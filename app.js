@@ -1,3 +1,4 @@
+function okLive(l){if(!l||typeof l!=='object'||!Number.isFinite(l.start)||l.start>Date.now()+6e4||l.start<Date.now()-7*864e5)return null;const br=Array.isArray(l.breaks)?l.breaks.filter(b=>b&&Number.isFinite(b.s)&&Number.isFinite(b.e)&&b.e>=b.s).slice(0,200):[];return{start:l.start,breaks:br,onBreak:Number.isFinite(l.onBreak)?l.onBreak:null,asked:!!l.asked}}
 const BR={single:[[0,0,0],[7500,0,.1],[19900,1240,.12],[57900,5800,.22],[113200,17966,.24],[209275,41024,.32],[263725,58448,.35],[648100,192979.25,.37]],
 married:[[0,0,0],[19300,0,.1],[44100,2480,.12],[120100,11600,.22],[230700,35932,.24],[422850,82048,.32],[531750,116896,.35],[788000,206583.5,.37]],
 hoh:[[0,0,0],[15550,0,.1],[33250,1770,.12],[83000,7740,.22],[121250,16155,.24],[217300,39207,.32],[271750,56631,.35],[656150,191171,.37]]};
@@ -5,7 +6,7 @@ const ADJ={single:8600,married:12900,hoh:8600},IL=2925,KEY='shiftpay-v1';
 const $=id=>document.getElementById(id);
 const DEF={name:'',pos:'Delivery Driver',rate:'22.50',freq:'52',filing:'single',il:'1',manual:false,mm:'combined',comb:'20',fed:'10',state:'4.95'};
 let st;try{st=JSON.parse(localStorage.getItem(KEY))||{}}catch(e){st={}}
-let P={...DEF,...(st.p||{})},S=st.s||[],view='week',mode='times',editId=null;
+let P={...DEF,...(st.p||{})},S=st.s||[],L=okLive(st.l),view='week',mode='times',editId=null;
 const iso=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const today=()=>iso(new Date());
 function wkStart(s){const d=new Date(s+'T12:00:00');d.setDate(d.getDate()-((d.getDay()+6)%7));return iso(d)}
@@ -15,11 +16,11 @@ const LASTBK='shiftpay-lastbackup';
 let idbp;const idb=()=>idbp||(idbp=new Promise((res,rej)=>{const r=indexedDB.open('shiftpay',1);r.onupgradeneeded=()=>{r.result.createObjectStore('kv');r.result.createObjectStore('snaps',{keyPath:'at'})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}));
 const tx=async(store,mode,fn)=>{const d=await idb();return new Promise((res,rej)=>{const t=d.transaction(store,mode),o=fn(t.objectStore(store));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)})};
 let snapTimer;
-const save=()=>{const json=JSON.stringify({p:P,s:S,savedAt:new Date().toISOString()});let ok=false;try{localStorage.setItem(KEY,json);ok=true}catch(e){}
+const save=()=>{const json=JSON.stringify({p:P,s:S,l:L,savedAt:new Date().toISOString()});let ok=false;try{localStorage.setItem(KEY,json);ok=true}catch(e){}
  tx('kv','readwrite',o=>o.put(json,'state')).then(()=>{ok=true}).catch(()=>{if(!ok)toast('Saving failed. Download a backup now.')});
  clearTimeout(snapTimer);snapTimer=setTimeout(snapshot,3000)};
 async function snapshot(){if(!S.length)return;try{await tx('snaps','readwrite',o=>o.put({at:new Date().toISOString(),data:backupObj()}));const all=await tx('snaps','readonly',o=>o.getAll());const old=all.sort((a,b)=>b.at.localeCompare(a.at)).slice(5);for(const x of old)await tx('snaps','readwrite',o=>o.delete(x.at));renderBackup()}catch(e){}}
-function backupObj(){return{format:'ShiftPay',version:1,exportedAt:new Date().toISOString(),profile:P,shifts:S}}
+function backupObj(){return{format:'ShiftPay',version:1,exportedAt:new Date().toISOString(),profile:P,shifts:S,activeShift:L}}
 function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(t._h);t._h=setTimeout(()=>t.hidden=true,3500)}
 const stamp=()=>new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
 function markBackedUp(){localStorage.setItem(LASTBK,new Date().toISOString());renderBackup()}
@@ -35,9 +36,9 @@ function validate(d){const re=/^\d{4}-\d{2}-\d{2}$/,tm=/^(\d{2}:\d{2})?$/;
  for(const s of d.shifts){if(!s||typeof s.id!=='string'||!re.test(s.date)||!tm.test(s.start||'')||!tm.test(s.end||'')||isNaN(+(s.hours||0))||isNaN(+(s.brk||0)))throw Error('Backup contains a malformed shift.')}
  const p={...DEF};for(const k of Object.keys(DEF))if(d.profile[k]!=null)p[k]=typeof DEF[k]==='boolean'?!!d.profile[k]:String(d.profile[k]).slice(0,100);
  if(!['single','married','hoh'].includes(p.filing))p.filing='single';if(!['52','26','24','12'].includes(p.freq))p.freq='52';if(!['combined','split'].includes(p.mm))p.mm='combined';
- return{p,s:d.shifts.map(s=>({id:s.id.slice(0,40),date:s.date,start:s.start||'',end:s.end||'',hours:String(s.hours||''),brk:String(s.brk||'')}))}}
+ return{l:okLive(d.activeShift),p,s:d.shifts.map(s=>({id:s.id.slice(0,40),date:s.date,start:s.start||'',end:s.end||'',hours:String(s.hours||''),brk:String(s.brk||'')}))}}
 function restore(d,label){const v=validate(d);if(!confirm(`Restore ${v.s.length} shift${v.s.length===1?'':'s'} from ${label}? This replaces what is on this phone now. A snapshot of the current data is kept.`))return false;
- snapshot().finally(()=>{P=v.p;S=v.s;syncInputs();save();render();toast(`Restored ${v.s.length} shifts.`)});return true}
+ snapshot().finally(()=>{P=v.p;S=v.s;L=v.l;syncInputs();save();render();toast(`Restored ${v.s.length} shifts.`)});return true}
 function importFile(f){if(!f)return;if(f.size>10*1048576){toast('That file is too large to be a Shift Pay backup.');return}const r=new FileReader;r.onload=()=>{try{const d=JSON.parse(r.result);if(restore(d,'this file')&&Date.parse(d.exportedAt))localStorage.setItem(LASTBK,new Date(d.exportedAt).toISOString())}catch(e){toast('Restore failed: '+e.message)}$('bkFile').value=''};r.readAsText(f)}
 async function renderBackup(){const last=localStorage.getItem(LASTBK);const days=last?(Date.now()-Date.parse(last))/864e5:Infinity;
  $('bkLast').textContent=last?new Date(last).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'Never';
@@ -111,6 +112,35 @@ setMode('times');setView('week');setMM(P.mm,true);
 $('bkExport').onclick=exportJSON;$('bkShare').onclick=shareJSON;$('bkFile').onchange=e=>importFile(e.target.files[0]);
 $('bkSnaps').onclick=async e=>{const b=e.target.closest('[data-snap]');if(!b)return;const all=await tx('snaps','readonly',o=>o.getAll());const x=all.find(y=>y.at===b.dataset.snap);if(x)try{restore(x.data,'the snapshot')}catch(err){toast(err.message)}};
 // recover from IndexedDB if localStorage was cleared
-(async()=>{try{const v=await tx('kv','readonly',o=>o.get('state'));const lsHas=!!localStorage.getItem(KEY);if(v&&!lsHas){const d=JSON.parse(v);if(Array.isArray(d.s)){P={...DEF,...d.p};S=d.s;localStorage.setItem(KEY,v);syncInputs();render();toast('Recovered your data from the backup copy on this phone.')}}else if(lsHas&&!v)save()}catch(e){}renderBackup()})();
+(async()=>{try{const v=await tx('kv','readonly',o=>o.get('state'));const lsHas=!!localStorage.getItem(KEY);if(v&&!lsHas){const d=JSON.parse(v);if(Array.isArray(d.s)){P={...DEF,...d.p};S=d.s;L=okLive(d.l);localStorage.setItem(KEY,v);syncInputs();render();toast('Recovered your data from the backup copy on this phone.')}}else if(lsHas&&!v)save()}catch(e){}renderBackup()})();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
 window.__calc={calc,pay,fedW};
+
+// ===== live shift =====
+const pad=n=>String(n).padStart(2,'0');
+const hm=ms=>{const d=new Date(ms);return pad(d.getHours())+':'+pad(d.getMinutes())};
+function breakMs(now){return (L.breaks||[]).reduce((a,b)=>a+b.e-b.s,0)+(L.onBreak?now-L.onBreak:0)}
+function liveNums(now){const worked=Math.max(0,now-L.start-breakMs(now)),h=worked/36e5,wk=wkStart(iso(new Date(L.start))),prior=weekHours(wk);
+ const a=pay(prior),b=pay(prior+h),ta=calc(a.gross),tb=calc(b.gross);const ot=prior+h>40;
+ return{worked,h,prior,gross:b.gross-a.gross,net:(b.gross-tb.total)-(a.gross-ta.total),ot,toOT:Math.max(0,40-prior-h),rate:(+P.rate||0)*(ot?1.5:1)}}
+const fmtT=ms=>{const s=Math.floor(ms/1e3);return pad(Math.floor(s/3600))+':'+pad(Math.floor(s/60)%60)+':'+pad(s%60)};
+const baseTitle='Shift Pay';
+function tick(){const lc=$('live'),cb=$('clockBtn');if(!L){lc.hidden=true;cb.hidden=false;document.title=baseTitle;return}
+ lc.hidden=false;cb.hidden=true;const now=Date.now(),n=liveNums(now);
+ lc.classList.toggle('ot',n.ot);lc.classList.toggle('brk',!!L.onBreak);
+ $('lTimer').textContent=fmtT(n.worked);$('lGross').textContent=money(n.gross);$('lNet').textContent=money(n.net);
+ $('lRate').textContent=money(n.rate)+'/hr'+(n.ot?' · 1.5×':'');$('lOT').hidden=!n.ot;
+ $('lState').textContent=L.onBreak?'On break · '+fmtT(now-L.onBreak):'On the clock since '+new Date(L.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+ $('lToOT').textContent=n.ot?`${(n.prior+n.h-40).toFixed(2)} overtime hrs this week`:`Overtime in ${fmtT(n.toOT*36e5)} · ${(n.prior+n.h).toFixed(2)} of 40 hrs this week`;
+ $('lBreak').textContent=L.onBreak?'End break':'Start break';
+ document.title=(L.onBreak?'⏸ ':'● ')+money(n.gross)+' · '+baseTitle;
+ if(!L.asked&&now-L.start>16*36e5){L.asked=true;save();setTimeout(()=>{if(confirm('You have been clocked in for over 16 hours. Did you forget to clock out?\n\nOK = clock out now (you can fix the end time after).\nCancel = keep the clock running.'))clockOut()},50)}}
+function clockIn(at){L={start:at||Date.now(),breaks:[],onBreak:null,asked:false};save();tick();toast('Clocked in. Have a good shift.')}
+function toggleBreak(){const now=Date.now();if(L.onBreak){L.breaks.push({s:L.onBreak,e:now});L.onBreak=null;toast('Break ended. Back on the clock.')}else{L.onBreak=now;toast('Break started. Earnings paused.')}save();tick()}
+function clockOut(){if(!L)return;const now=Date.now();if(L.onBreak){L.breaks.push({s:L.onBreak,e:now});L.onBreak=null}
+ const brk=Math.round(L.breaks.reduce((a,b)=>a+b.e-b.s,0)/6e4),s={id:String(now),date:iso(new Date(L.start)),start:hm(L.start),end:hm(now),hours:'',brk:String(brk)};
+ if(now-L.start<6e4){L=null;save();tick();toast('Shift under a minute, not saved.');return}
+ S=[...S,s];week=wkStart(s.date);L=null;save();render();tick();toast(`Shift saved: ${hrs(s).toFixed(2)} hrs. Tap ✎ to edit.`)}
+$('clockBtn').onclick=()=>clockIn();$('lBreak').onclick=toggleBreak;$('lOut').onclick=()=>{if(confirm('Clock out and save this shift?'))clockOut()};
+setInterval(tick,250);tick();document.addEventListener('visibilitychange',tick);
+window.__live={clockIn,clockOut,toggleBreak,get L(){return L},set L(v){L=v;save();tick()}};
