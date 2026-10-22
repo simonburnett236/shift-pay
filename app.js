@@ -10,7 +10,42 @@ const iso=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice
 const today=()=>iso(new Date());
 function wkStart(s){const d=new Date(s+'T12:00:00');d.setDate(d.getDate()-((d.getDay()+6)%7));return iso(d)}
 let week=wkStart(today());
-const save=()=>{try{localStorage.setItem(KEY,JSON.stringify({p:P,s:S}))}catch(e){}};
+// ---- storage & backup (mirrors RootLedger: local-only, JSON export/share, validated import, auto-snapshots) ----
+const LASTBK='shiftpay-lastbackup';
+let idbp;const idb=()=>idbp||(idbp=new Promise((res,rej)=>{const r=indexedDB.open('shiftpay',1);r.onupgradeneeded=()=>{r.result.createObjectStore('kv');r.result.createObjectStore('snaps',{keyPath:'at'})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}));
+const tx=async(store,mode,fn)=>{const d=await idb();return new Promise((res,rej)=>{const t=d.transaction(store,mode),o=fn(t.objectStore(store));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)})};
+let snapTimer;
+const save=()=>{const json=JSON.stringify({p:P,s:S,savedAt:new Date().toISOString()});let ok=false;try{localStorage.setItem(KEY,json);ok=true}catch(e){}
+ tx('kv','readwrite',o=>o.put(json,'state')).then(()=>{ok=true}).catch(()=>{if(!ok)toast('Saving failed. Download a backup now.')});
+ clearTimeout(snapTimer);snapTimer=setTimeout(snapshot,3000)};
+async function snapshot(){if(!S.length)return;try{await tx('snaps','readwrite',o=>o.put({at:new Date().toISOString(),data:backupObj()}));const all=await tx('snaps','readonly',o=>o.getAll());const old=all.sort((a,b)=>b.at.localeCompare(a.at)).slice(5);for(const x of old)await tx('snaps','readwrite',o=>o.delete(x.at));renderBackup()}catch(e){}}
+function backupObj(){return{format:'ShiftPay',version:1,exportedAt:new Date().toISOString(),profile:P,shifts:S}}
+function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(t._h);t._h=setTimeout(()=>t.hidden=true,3500)}
+const stamp=()=>new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+function markBackedUp(){localStorage.setItem(LASTBK,new Date().toISOString());renderBackup()}
+function exportJSON(){const blob=new Blob([JSON.stringify(backupObj(),null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='ShiftPay-backup-'+stamp()+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);markBackedUp();toast('Backup downloaded. Keep it somewhere safe.')}
+async function shareJSON(){const name='ShiftPay-backup-'+stamp()+'.json',file=new File([JSON.stringify(backupObj(),null,2)],name,{type:'application/json'});
+ if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:'Shift Pay backup'});markBackedUp();toast('Backup shared. Pick Drive or Files to keep it safe.');return}catch(e){if(e.name==='AbortError')return}}
+ exportJSON()}
+function validate(d){const re=/^\d{4}-\d{2}-\d{2}$/,tm=/^(\d{2}:\d{2})?$/;
+ if(!d||d.format!=='ShiftPay'||typeof d.version!=='number')throw Error('Not a Shift Pay backup file.');
+ if(d.version>1)throw Error('This backup is from a newer version of Shift Pay.');
+ if(!Array.isArray(d.shifts)||d.shifts.length>20000)throw Error('Backup has no valid shift list.');
+ if(!d.profile||typeof d.profile!=='object')throw Error('Backup is missing the profile.');
+ for(const s of d.shifts){if(!s||typeof s.id!=='string'||!re.test(s.date)||!tm.test(s.start||'')||!tm.test(s.end||'')||isNaN(+(s.hours||0))||isNaN(+(s.brk||0)))throw Error('Backup contains a malformed shift.')}
+ const p={...DEF};for(const k of Object.keys(DEF))if(d.profile[k]!=null)p[k]=typeof DEF[k]==='boolean'?!!d.profile[k]:String(d.profile[k]).slice(0,100);
+ if(!['single','married','hoh'].includes(p.filing))p.filing='single';if(!['52','26','24','12'].includes(p.freq))p.freq='52';if(!['combined','split'].includes(p.mm))p.mm='combined';
+ return{p,s:d.shifts.map(s=>({id:s.id.slice(0,40),date:s.date,start:s.start||'',end:s.end||'',hours:String(s.hours||''),brk:String(s.brk||'')}))}}
+function restore(d,label){const v=validate(d);if(!confirm(`Restore ${v.s.length} shift${v.s.length===1?'':'s'} from ${label}? This replaces what is on this phone now. A snapshot of the current data is kept.`))return false;
+ snapshot().finally(()=>{P=v.p;S=v.s;syncInputs();save();render();toast(`Restored ${v.s.length} shifts.`)});return true}
+function importFile(f){if(!f)return;if(f.size>10*1048576){toast('That file is too large to be a Shift Pay backup.');return}const r=new FileReader;r.onload=()=>{try{const d=JSON.parse(r.result);if(restore(d,'this file')&&Date.parse(d.exportedAt))localStorage.setItem(LASTBK,new Date(d.exportedAt).toISOString())}catch(e){toast('Restore failed: '+e.message)}$('bkFile').value=''};r.readAsText(f)}
+async function renderBackup(){const last=localStorage.getItem(LASTBK);const days=last?(Date.now()-Date.parse(last))/864e5:Infinity;
+ $('bkLast').textContent=last?new Date(last).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'Never';
+ const w=$('bkWarn');if(S.length&&days>=7){w.hidden=false;w.textContent=last?`It has been ${Math.floor(days)} days since your last backup. Download or share one now.`:'You have not backed up yet. Download or share a backup so your hours are safe if you lose this phone.'}else w.hidden=true;
+ let snaps=[];try{snaps=(await tx('snaps','readonly',o=>o.getAll())).sort((a,b)=>b.at.localeCompare(a.at))}catch(e){}
+ $('bkSafe').textContent=(localStorage.getItem(KEY)?1:0)+1+snaps.length+'';
+ $('bkSnaps').innerHTML=snaps.length?'<div class="note" style="margin:14px 0 4px">Automatic snapshots on this phone</div>'+snaps.map(x=>`<div class="snap"><span>${new Date(x.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} · ${x.data.shifts.length} shifts</span><button class="sm" data-snap="${x.at}">Restore</button></div>`).join(''):''}
+
 function hrs(s){let h;if(s.start&&s.end){const[a,b]=s.start.split(':').map(Number),[c,d]=s.end.split(':').map(Number);let m=c*60+d-a*60-b;if(m<0)m+=1440;h=m/60}else h=+s.hours||0;return Math.max(0,h-(+s.brk||0)/60)}
 function fedW(g,n,f){const a=Math.max(0,g*n-ADJ[f]);let r=BR[f][0];for(const x of BR[f])if(a>=x[0])r=x;return Math.max(0,(r[1]+(a-r[0])*r[2])/n)}
 function calc(g){const n=52;if(P.manual){if(P.mm==='combined'){const t=g*(+P.comb||0)/100;return{fed:t,ss:0,med:0,il:0,total:t,comb:true}}
@@ -55,14 +90,16 @@ function preview(){const s={start:mode==='times'?$('eStart').value:'',end:mode==
 function seg(id,val,fn){document.querySelectorAll('#'+id+' button').forEach(b=>{b.classList.toggle('on',b.dataset.v===val);b.onclick=()=>fn(b.dataset.v)})}
 function setMode(m){mode=m;seg('eSeg',m,setMode);document.querySelectorAll('.tm').forEach(e=>e.hidden=m!=='times');document.querySelector('.hr').hidden=m!=='hours';preview()}
 function setView(v){view=v;seg('vSeg',v,setView);render()}
-function setMM(v){P.mm=v;seg('mSeg',v,setMM);$('cL').hidden=v!=='combined';$('fL').hidden=$('sL').hidden=$('splitNote').hidden=v==='combined';save();render()}
+function setMM(v,init){P.mm=v;seg('mSeg',v,x=>setMM(x));$('cL').hidden=v!=='combined';$('fL').hidden=$('sL').hidden=$('splitNote').hidden=v==='combined';if(!init)save();render()}
 function resetEntry(){editId=null;$('eTitle').textContent='Log a shift';$('eSave').textContent='Add shift';$('eCancel').hidden=true}
 const bind={pName:'name',pPos:'pos',pRate:'rate',pFreq:'freq',pFiling:'filing',pIl:'il',pComb:'comb',pFed:'fed',pState:'state'};
+function syncInputs(){for(const[id,k]of Object.entries(bind))$(id).value=P[k];$('pManual').checked=P.manual;$('manualBox').hidden=!P.manual;setMM(P.mm,true)}
 for(const[id,k]of Object.entries(bind)){$(id).value=P[k];$(id).addEventListener('input',e=>{P[k]=e.target.value;save();render()})}
 $('pManual').checked=P.manual;$('manualBox').hidden=!P.manual;$('pManual').onchange=e=>{P.manual=e.target.checked;$('manualBox').hidden=!P.manual;save();render()};
 $('profBtn').onclick=()=>{$('profile').hidden=!$('profile').hidden};if(!st.p)$('profile').hidden=false;
 $('eDate').value=today();$('eStart').value='09:00';$('eEnd').value='19:30';$('eBrk').value='30';
 ['eStart','eEnd','eHours','eBrk'].forEach(i=>$(i).addEventListener('input',preview));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)renderBackup()});
 $('eSave').onclick=()=>{const s={id:editId||String(Date.now()),date:$('eDate').value||today(),start:mode==='times'?$('eStart').value:'',end:mode==='times'?$('eEnd').value:'',hours:mode==='hours'?$('eHours').value:'',brk:$('eBrk').value};
  if(hrs(s)<=0)return;S=editId?S.map(x=>x.id===editId?s:x):[...S,s];week=wkStart(s.date);resetEntry();save();render()};
 $('eCancel').onclick=resetEntry;
@@ -70,6 +107,10 @@ $('list').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.datas
  if(b.dataset.e){const s=S.find(x=>x.id===b.dataset.e);editId=s.id;$('eDate').value=s.date;$('eBrk').value=s.brk;if(s.start){$('eStart').value=s.start;$('eEnd').value=s.end;setMode('times')}else{$('eHours').value=s.hours;setMode('hours')}$('eTitle').textContent='Edit shift';$('eSave').textContent='Save changes';$('eCancel').hidden=false;$('entry').scrollIntoView({behavior:'smooth'})}};
 $('prevW').onclick=()=>{const d=new Date(week+'T12:00:00');d.setDate(d.getDate()-7);week=iso(d);render()};
 $('nextW').onclick=()=>{const d=new Date(week+'T12:00:00');d.setDate(d.getDate()+7);week=iso(d);render()};
-setMode('times');setView('week');setMM(P.mm);
+setMode('times');setView('week');setMM(P.mm,true);
+$('bkExport').onclick=exportJSON;$('bkShare').onclick=shareJSON;$('bkFile').onchange=e=>importFile(e.target.files[0]);
+$('bkSnaps').onclick=async e=>{const b=e.target.closest('[data-snap]');if(!b)return;const all=await tx('snaps','readonly',o=>o.getAll());const x=all.find(y=>y.at===b.dataset.snap);if(x)try{restore(x.data,'the snapshot')}catch(err){toast(err.message)}};
+// recover from IndexedDB if localStorage was cleared
+(async()=>{try{const v=await tx('kv','readonly',o=>o.get('state'));const lsHas=!!localStorage.getItem(KEY);if(v&&!lsHas){const d=JSON.parse(v);if(Array.isArray(d.s)){P={...DEF,...d.p};S=d.s;localStorage.setItem(KEY,v);syncInputs();render();toast('Recovered your data from the backup copy on this phone.')}}else if(lsHas&&!v)save()}catch(e){}renderBackup()})();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
 window.__calc={calc,pay,fedW};
