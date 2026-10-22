@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 const iso=C.iso,today=()=>iso(new Date());
 function okLive(l){if(!l||typeof l!=='object'||!Number.isFinite(l.start)||l.start>Date.now()+6e4||l.start<Date.now()-7*864e5)return null;const br=Array.isArray(l.breaks)?l.breaks.filter(b=>b&&Number.isFinite(b.s)&&Number.isFinite(b.e)&&b.e>=b.s).slice(0,200):[];return{start:l.start,breaks:br,onBreak:Number.isFinite(l.onBreak)?l.onBreak:null,asked:!!l.asked}}
 let st;try{st=JSON.parse(localStorage.getItem(KEY))||{}}catch(e){st={}}
-let P=C.migrate(st.p),S=Array.isArray(st.s)?st.s:[],L=okLive(st.l),view='period',mode='times',editId=null;
+let P=C.migrate(st.p),S=Array.isArray(st.s)?st.s:[],SC=Array.isArray(st.sc)?st.sc:[],L=okLive(st.l),view='period',mode='times',editId=null;
 const money=n=>C.money(n,P),hrs=s=>C.hrs(s,P),wkStart=d=>C.wkStart(d,P);
 let week=wkStart(today()),NAT=+(st.nativeAt||0);
 
@@ -12,13 +12,13 @@ let idbp;const idb=()=>idbp||(idbp=new Promise((res,rej)=>{const r=indexedDB.ope
 const withTO=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(Error('timeout')),ms))]);
 const tx=(store,mode,fn)=>withTO(idb().then(d=>new Promise((res,rej)=>{const t=d.transaction(store,mode),o=fn(t.objectStore(store));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)})),2500).catch(e=>{if(e.message==='timeout')idbp=null;throw e});
 let snapTimer;
-function stateJSON(){const o={p:P,s:S,l:L,savedAt:new Date().toISOString(),nativeAt:NAT};if(L)o.sched=C.schedule(S,P,iso(new Date(L.start)));o.nextSched=C.schedule(S,P,today());return JSON.stringify(o)}
+function stateJSON(){const o={p:P,s:S,sc:SC,l:L,savedAt:new Date().toISOString(),nativeAt:NAT,rem:reminders()};if(L)o.sched=C.schedule(S,P,iso(new Date(L.start)));o.nextSched=C.schedule(S,P,today());return JSON.stringify(o)}
 const save=()=>{const json=stateJSON();let ok=false;try{localStorage.setItem(KEY,json);ok=true}catch(e){}
  if(NATIVE){try{NATIVE.setState(json);ok=true}catch(e){}}
  tx('kv','readwrite',o=>o.put(json,'state')).then(()=>{notifySW()}).catch(()=>{if(!ok)toast('Saving failed. Download a backup now.')});
  clearTimeout(snapTimer);snapTimer=setTimeout(snapshot,3000)};
-async function snapshot(){if(!S.length)return;try{await tx('snaps','readwrite',o=>o.put({at:new Date().toISOString(),data:backupObj()}));const all=await tx('snaps','readonly',o=>o.getAll());for(const x of all.sort((a,b)=>b.at.localeCompare(a.at)).slice(5))await tx('snaps','readwrite',o=>o.delete(x.at));renderBackup()}catch(e){}}
-function adopt(d){if(!d||!Array.isArray(d.s))return false;P=C.migrate(d.p);S=d.s;L=okLive(d.l);NAT=Math.max(NAT,+(d.nativeAt||0));try{localStorage.setItem(KEY,JSON.stringify({p:P,s:S,l:L,savedAt:d.savedAt,nativeAt:NAT}))}catch(e){}return true}
+async function snapshot(){if(!S.length&&!SC.length)return;try{await tx('snaps','readwrite',o=>o.put({at:new Date().toISOString(),data:backupObj()}));const all=await tx('snaps','readonly',o=>o.getAll());for(const x of all.sort((a,b)=>b.at.localeCompare(a.at)).slice(5))await tx('snaps','readwrite',o=>o.delete(x.at));renderBackup()}catch(e){}}
+function adopt(d){if(!d||!Array.isArray(d.s))return false;P=C.migrate(d.p);S=d.s;SC=Array.isArray(d.sc)?d.sc:SC;L=okLive(d.l);NAT=Math.max(NAT,+(d.nativeAt||0));try{localStorage.setItem(KEY,JSON.stringify({p:P,s:S,sc:SC,l:L,savedAt:d.savedAt,nativeAt:NAT}))}catch(e){}return true}
 let syncQ=Promise.resolve();function syncAll(quiet){syncQ=syncQ.then(()=>withTO(syncNow(quiet),6000)).catch(()=>{});return syncQ}
 async function syncNow(quiet){let best=null;const cand=[];try{const ls=localStorage.getItem(KEY);if(ls)cand.push(JSON.parse(ls))}catch(e){}
  try{const v=await tx('kv','readonly',o=>o.get('state'));if(v)cand.push(JSON.parse(v))}catch(e){}
@@ -31,7 +31,7 @@ async function syncNow(quiet){let best=null;const cand=[];try{const ls=localStor
 window.__spSync=()=>syncAll(true);
 
 // ---------- backup ----------
-function backupObj(){return{format:'ShiftPay',version:2,exportedAt:new Date().toISOString(),profile:P,shifts:S,activeShift:L}}
+function backupObj(){return{format:'ShiftPay',version:3,exportedAt:new Date().toISOString(),profile:P,shifts:S,schedule:SC,activeShift:L}}
 function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(t._h);t._h=setTimeout(()=>t.hidden=true,3500)}
 const stamp=()=>new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
 function markBackedUp(){localStorage.setItem(LASTBK,new Date().toISOString());renderBackup()}
@@ -45,21 +45,23 @@ async function shareJSON(){const name='ShiftPay-backup-'+stamp()+'.json',json=JS
  exportJSON()}
 function validate(d){const re=/^\d{4}-\d{2}-\d{2}$/,tm=/^(\d{2}:\d{2})?$/;
  if(!d||d.format!=='ShiftPay'||typeof d.version!=='number')throw Error('Not a Shift Pay backup file.');
- if(d.version>2)throw Error('This backup is from a newer version of Shift Pay.');
+ if(d.version>3)throw Error('This backup is from a newer version of Shift Pay.');
  if(!Array.isArray(d.shifts)||d.shifts.length>20000)throw Error('Backup has no valid shift list.');
  if(!d.profile||typeof d.profile!=='object')throw Error('Backup is missing the settings.');
  for(const s of d.shifts){if(!s||typeof s.id!=='string'||!re.test(s.date)||!tm.test(s.start||'')||!tm.test(s.end||'')||isNaN(+(s.hours||0))||isNaN(+(s.brk||0)))throw Error('Backup contains a malformed shift.')}
+ const sch=d.schedule==null?[]:d.schedule;if(!Array.isArray(sch)||sch.length>20000)throw Error('Backup has an invalid schedule.');
+ for(const s of sch){if(!s||typeof s.id!=='string'||!re.test(s.date)||!/^\d{2}:\d{2}$/.test(s.start||'')||!/^\d{2}:\d{2}$/.test(s.end||'')||isNaN(+(s.brk||0)))throw Error('Backup contains a malformed scheduled shift.')}
  const raw=C.migrate(d.profile),p={};for(const k of Object.keys(C.DEF))p[k]=typeof C.DEF[k]==='boolean'?!!raw[k]:String(raw[k]==null?C.DEF[k]:raw[k]).slice(0,100);
- return{l:okLive(d.activeShift),p:C.migrate(p),s:d.shifts.map(s=>({id:s.id.slice(0,40),date:s.date,start:s.start||'',end:s.end||'',hours:String(s.hours||''),brk:String(s.brk||'')}))}}
-function restore(d,label){const v=validate(d);if(!confirm(`Restore ${v.s.length} shift${v.s.length===1?'':'s'} from ${label}? This replaces what is on this phone now. A snapshot of the current data is kept.`))return false;
- snapshot().finally(()=>{P=v.p;S=v.s;L=v.l;save();refreshAll();toast(`Restored ${v.s.length} shifts.`)});return true}
+ return{l:okLive(d.activeShift),p:C.migrate(p),s:d.shifts.map(s=>({id:s.id.slice(0,40),date:s.date,start:s.start||'',end:s.end||'',hours:String(s.hours||''),brk:String(s.brk||'')})),sc:sch.map(s=>({id:s.id.slice(0,40),date:s.date,start:s.start,end:s.end,brk:String(s.brk||''),note:String(s.note||'').slice(0,200)}))}}
+function restore(d,label){const v=validate(d);if(!confirm(`Restore ${v.s.length} shift${v.s.length===1?'':'s'}${v.sc.length?' and '+v.sc.length+' scheduled':''} from ${label}? This replaces what is on this phone now. A snapshot of the current data is kept.`))return false;
+ snapshot().finally(()=>{P=v.p;S=v.s;SC=v.sc;L=v.l;save();refreshAll();toast(`Restored ${v.s.length} shifts.`)});return true}
 function importFile(f){if(!f)return;if(f.size>10*1048576){toast('That file is too large to be a Shift Pay backup.');return}const r=new FileReader;r.onload=()=>{try{const d=JSON.parse(r.result);if(restore(d,'this file')&&Date.parse(d.exportedAt)){localStorage.setItem(LASTBK,new Date(d.exportedAt).toISOString());renderBackup()}}catch(e){toast('Restore failed: '+e.message)}$('bkFile').value=''};r.readAsText(f)}
 async function renderBackup(){const last=localStorage.getItem(LASTBK);const days=last?(Date.now()-Date.parse(last))/864e5:Infinity;
  $('bkLast').textContent=last?new Date(last).toLocaleDateString('en-US',{month:'short',day:'numeric'})+', '+C.clock(Date.parse(last),P):'Never';
  const w=$('bkWarn');if(S.length&&days>=7){w.hidden=false;w.textContent=last?`It has been ${Math.floor(days)} days since your last backup. Download or share one now.`:'You have not backed up yet. Download or share a backup so your hours are safe if you lose this phone.'}else w.hidden=true;
  let snaps=[];try{snaps=(await tx('snaps','readonly',o=>o.getAll())).sort((a,b)=>b.at.localeCompare(a.at))}catch(e){}
  $('bkSafe').textContent=String((localStorage.getItem(KEY)?1:0)+1+(NATIVE?1:0)+snaps.length);
- $('bkSnaps').innerHTML=snaps.length?'<div class="note" style="margin:14px 0 4px">Automatic snapshots on this phone</div>'+snaps.map(x=>`<div class="snap"><span>${new Date(x.at).toLocaleDateString('en-US',{month:'short',day:'numeric'})} ${C.clock(Date.parse(x.at),P)} · ${x.data.shifts.length} shifts</span><button class="sm" data-snap="${x.at}">Restore</button></div>`).join(''):''}
+ $('bkSnaps').innerHTML=snaps.length?'<div class="note" style="margin:14px 0 4px">Automatic snapshots on this phone</div>'+snaps.map(x=>`<div class="snap"><span>${new Date(x.at).toLocaleDateString('en-US',{month:'short',day:'numeric'})} ${C.clock(Date.parse(x.at),P)} · ${x.data.shifts.length} shifts${(x.data.schedule||[]).length?' · '+x.data.schedule.length+' scheduled':''}</span><button class="sm" data-snap="${x.at}">Restore</button></div>`).join(''):''}
 
 // ---------- pay math helpers ----------
 function periodSummary(per){const g=C.rangePay(S,P,per.start,per.end),t=C.taxes(g.gross,P);return{...g,...t,net:g.gross-t.total-t.pre}}
@@ -107,7 +109,7 @@ function seg(id,val,fn){document.querySelectorAll('#'+id+' button').forEach(b=>{
 function setMode(m){mode=m;seg('eSeg',m,setMode);document.querySelectorAll('.tm').forEach(e=>e.hidden=m!=='times');document.querySelector('.hr').hidden=m!=='hours';preview()}
 function setView(v){view=v;seg('vSeg',v,setView);render()}
 function resetEntry(){editId=null;$('eTitle').textContent='Log a shift';$('eSave').textContent='Add shift';$('eCancel').hidden=true}
-function refreshAll(){week=wkStart(week);render();tick();renderBackup()}
+function refreshAll(){week=wkStart(week);render();renderSched();tick();renderBackup()}
 
 // ---------- settings + first-run wizard ----------
 const F=[
@@ -119,7 +121,7 @@ const F=[
  {g:'Overtime & breaks',f:[['weekStart','Work week starts','chips',DAYS.map((d,i)=>[String(i),d])],['otWeekly','Overtime after (hrs/week)','num'],['otMult','Overtime multiplier','num'],['otDaily','Daily overtime after (hrs/day, blank = off)','num'],
   ['dtDaily','Double time after (hrs/day, blank = off)','num'],['dtMult','Double-time multiplier','num',null,p=>C.num(p.dtDaily,0)>0],['breaksPaid','Breaks are paid','toggle'],['autoAfter','Auto-deduct a break on shifts longer than (hrs, blank = off)','num',null,p=>!p.breaksPaid],['autoMin','Auto-deducted break (min)','num',null,p=>!p.breaksPaid&&C.num(p.autoAfter,0)>0],
   ['rounding','Round clock times','chips',[['0','None'],['5','5 min'],['6','6 min'],['15','15 min']]]]},
- {g:'Display',f:[['currency','Currency','chips',[['USD','$ USD'],['CAD','$ CAD'],['EUR','€ EUR'],['GBP','£ GBP'],['MXN','$ MXN']]],['clock','Time format','chips',[['12','12-hour'],['24','24-hour']]]]}];
+ {g:'Display',f:[['currency','Currency','chips',[['USD','$ USD'],['CAD','$ CAD'],['EUR','€ EUR'],['GBP','£ GBP'],['MXN','$ MXN']]],['clock','Time format','chips',[['12','12-hour'],['24','24-hour']]],['remindMin','Remind me before a scheduled shift','chips',[['','Off'],['15','15 min'],['30','30 min'],['60','1 hr'],['120','2 hrs']]]]}];
 let D=null,step=0,wizard=false;
 function openSettings(wiz){D={...P};wizard=!!wiz;step=0;$('setModal').hidden=false;drawSheet()}
 function drawSheet(){const groups=wizard?[F[step]]:F;let h='';
@@ -177,9 +179,64 @@ function clockOut(){if(!L)return;const now=Date.now();if(now-L.start<6e4){L=null
 async function askNotify(){try{if(NATIVE){NATIVE.requestNotify();return}if(!('Notification'in window)||!navigator.serviceWorker)return;if(Notification.permission==='default')await Notification.requestPermission();if(Notification.permission==='granted'){notifySW();const r=await navigator.serviceWorker.ready;if(r.periodicSync)r.periodicSync.register('shiftpay-refresh',{minInterval:60000}).catch(()=>{})}}catch(e){}}
 function notifySW(){if(NATIVE)return;try{if(L&&navigator.serviceWorker&&navigator.serviceWorker.controller)navigator.serviceWorker.controller.postMessage('refresh');else if(!L&&navigator.serviceWorker)navigator.serviceWorker.ready.then(r=>r.getNotifications({tag:'shiftpay-live'})).then(ns=>ns.forEach(n=>n.close())).catch(()=>{})}catch(e){}}
 
+// ---------- schedule ----------
+let schWeek=wkStart(today()),schEdit=null,schDays=new Set();
+const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const t12=v=>{if(!v||P.clock==='24')return v;const[h,m]=v.split(':').map(Number);return((h%12)||12)+':'+String(m).padStart(2,'0')+(h<12?' AM':' PM')};
+const scMs=(date,hm)=>{const[h,m]=hm.split(':').map(Number);const d=new Date(date+'T00:00:00');d.setHours(h,m,0,0);return d.getTime()};
+const scEndMs=s=>{let e=scMs(s.date,s.end);if(e<=scMs(s.date,s.start))e+=864e5;return e};
+const scSort=(a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start);
+/* estimated pay for a week of scheduled shifts, using the same overtime + tax engine (tax figured at the per-period rate) */
+function schedWeek(ws){const g=C.weekPay(SC,P,ws),n=C.PER[P.freq]||52,f=52/n,t=C.taxes(g.gross*f,P);return{...g,tax:t.total/f,net:g.gross-(t.total+t.pre)/f}}
+function nextShift(){const now=Date.now();return SC.filter(s=>scEndMs(s)>now).sort(scSort)[0]||null}
+function reminders(){const m=C.num(P.remindMin,0);if(!(m>0))return[];const now=Date.now();
+ return SC.map(s=>({s,at:scMs(s.date,s.start)-m*6e4})).filter(x=>x.at>now&&x.at<now+62*864e5).sort((a,b)=>a.at-b.at).slice(0,60)
+  .map(({s,at})=>({id:s.id,at,title:'Shift at '+t12(s.start)+(m>=60?' · in '+(m/60)+' hr'+(m>60?'s':''):' · in '+m+' min'),body:fmtD(s.date,{weekday:'long',month:'short',day:'numeric'})+' · '+t12(s.start)+' – '+t12(s.end)+(s.note?' · '+s.note:'')}))}
+function renderNext(){const n=nextShift(),el=$('nextCard');if(!n||L){el.hidden=true;return}el.hidden=false;const now=Date.now(),st=scMs(n.date,n.start),h=hrs(n);
+ const d=n.date===today()?'Today':n.date===C.addDays(today(),1)?'Tomorrow':fmtD(n.date,{weekday:'long',month:'short',day:'numeric'});
+ const live=st<=now,mins=Math.round((st-now)/6e4),inTxt=live?'Started — tap Clock In':mins<60?`Starts in ${mins} min`:mins<1440?`Starts in ${Math.floor(mins/60)}h ${String(mins%60).padStart(2,'0')}m`:'';
+ $('nxDay').textContent=d+(n.date===today()?"'s shift":' · next shift');$('nxTime').textContent=t12(n.start)+' – '+t12(n.end);
+ $('nxMeta').textContent=[h.toFixed(2)+' hrs',money(h*C.num(P.rate,0))+' base',n.note].filter(Boolean).join(' · ');$('nxIn').textContent=inTxt;$('nxIn').hidden=!inTxt;el.classList.toggle('soon',live||mins<60)}
+function renderSched(){schWeek=wkStart(schWeek);const ws=schWeek,we=C.addDays(ws,6),w=schedWeek(ws),act=C.weekPay(S,P,ws);
+ $('scLabel').textContent=`${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(we,{month:'short',day:'numeric'})}`+(ws===wkStart(today())?' · this week':'');
+ $('scHrs').textContent=w.h.toFixed(1);$('scGross').textContent=money(w.gross);$('scNet').textContent=money(w.net);$('scOT').hidden=!(w.ot+w.dbl>0);$('scOT').textContent=`Includes ${(w.ot+w.dbl).toFixed(2)} overtime hrs`;
+ const mx=Math.max(w.h,act.h,1);$('cmpS').style.width=(w.h/mx*100)+'%';$('cmpA').style.width=(act.h/mx*100)+'%';$('cmpSv').textContent=w.h.toFixed(2)+' hrs';$('cmpAv').textContent=act.h.toFixed(2)+' hrs';
+ const diff=act.h-w.h;$('cmpNote').textContent=!w.h&&!act.h?'Nothing scheduled or worked this week.':!w.h?'No schedule saved for this week.':Math.abs(diff)<.01?'Right on schedule.':diff>0?`${diff.toFixed(2)} hrs over schedule · ${money(act.gross-w.gross)} more gross`:`${(-diff).toFixed(2)} hrs to go`+(we>=today()?' to hit your schedule':' under schedule');
+ let cal='';for(let i=0;i<7;i++){const d=C.addDays(ws,i),dd=new Date(d+'T12:00:00'),day=SC.filter(s=>s.date===d),sh=day.reduce((a,s)=>a+hrs(s),0),ah=S.filter(s=>s.date===d).reduce((a,s)=>a+hrs(s),0);
+  cal+=`<button class="cday${d===today()?' today':''}${day.length?' has':''}${d<today()?' past':''}" data-day="${d}"><span class="cdn">${DAYS[dd.getDay()][0]}</span><b>${dd.getDate()}</b><span class="cdh">${sh?sh.toFixed(1)+'h':'–'}</span>${ah?`<i class="cda" title="worked">${ah.toFixed(1)}</i>`:''}</button>`}
+ $('scCal').innerHTML=cal;
+ const list=SC.filter(s=>s.date>=ws&&s.date<=we).sort(scSort);
+ $('scList').innerHTML=list.length?list.map(s=>{const d=new Date(s.date+'T12:00:00'),h=hrs(s),done=scEndMs(s)<Date.now(),worked=S.some(x=>x.date===s.date);return`<button class="sshift${done?' done':''}" data-sc="${s.id}"><div class="day">${DAYS[d.getDay()]}<b>${d.getDate()}</b></div><div style="flex:1;min-width:0;text-align:left"><div style="font-weight:600">${t12(s.start)} – ${t12(s.end)} <span style="color:#9aa1b5;font-weight:400">· ${h.toFixed(2)} hrs</span></div><div class="note">${+s.brk?s.brk+' min break · ':''}${money(h*C.num(P.rate,0))} base${s.note?' · '+esc(s.note):''}${done?(worked?' · <span style="color:var(--ok)">worked ✓</span>':' · <span style="color:var(--d)">no hours logged</span>'):''}</div></div><span class="chev">›</span></button>`}).join(''):`<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15h6"/></svg><div>Nothing scheduled this week.</div><div class="note">Tap “Add to schedule” to save your shifts, or set them to repeat every week.</div></div>`;
+ renderNext()}
+function openSched(id,date){const s=id?SC.find(x=>x.id===id):null;schEdit=s?s.id:null;const last=SC.slice().sort(scSort).pop();
+ $('scTitle').textContent=s?'Edit scheduled shift':'Add to schedule';$('sDate').value=s?s.date:(date||(schWeek===wkStart(today())?today():schWeek));
+ $('sStart').value=s?s.start:(last?last.start:'09:00');$('sEnd').value=s?s.end:(last?last.end:'19:30');$('sBrk').value=s?s.brk:(last?last.brk:'30');$('sNote').value=s?s.note||'':'';
+ $('sRepeat').hidden=!!s;$('sDel').hidden=!s;$('sSave').textContent=s?'Save changes':'Save to schedule';schDays=new Set();$('sWeeks').value='4';drawDays();schPrev();$('schModal').hidden=false}
+function drawDays(){const ws=+P.weekStart||0;let h='';for(let i=0;i<7;i++){const k=(ws+i)%7;h+=`<button data-dw="${k}" class="${schDays.has(k)?'on':''}">${DAYS[k]}</button>`}$('sDays').innerHTML=h;$('sWeeksRow').hidden=!schDays.size;schPrev()}
+function schDates(){const d0=$('sDate').value||today();if(schEdit||!schDays.size)return[d0];const n=Math.max(1,Math.min(52,Math.round(C.num($('sWeeks').value,1)))),ws=wkStart(d0),out=[];
+ for(let w=0;w<n;w++)for(let i=0;i<7;i++){const d=C.addDays(ws,w*7+i);if(d>=d0&&schDays.has(new Date(d+'T12:00:00').getDay()))out.push(d)}return out}
+function schPrev(){const s={start:$('sStart').value,end:$('sEnd').value,brk:$('sBrk').value},h=s.start&&s.end?hrs(s):0,ds=schDates();
+ $('sPrev').textContent=`${h.toFixed(2)} paid hrs per shift`+(ds.length>1?` · ${ds.length} shifts, ${ds[0].slice(5).replace('-','/')} → ${ds[ds.length-1].slice(5).replace('-','/')}`:'')+(!ds.length?' · no matching days on or after this date':'')}
+function bindSched(){$('scAdd').onclick=()=>openSched();$('scPrev').onclick=()=>{schWeek=C.addDays(schWeek,-7);renderSched()};$('scNext').onclick=()=>{schWeek=C.addDays(schWeek,7);renderSched()};
+ $('scList').onclick=e=>{const b=e.target.closest('[data-sc]');if(b)openSched(b.dataset.sc)};
+ $('scCal').onclick=e=>{const b=e.target.closest('[data-day]');if(!b)return;const one=SC.filter(s=>s.date===b.dataset.day);if(one.length===1)openSched(one[0].id);else openSched(null,b.dataset.day)};
+ $('nextCard').onclick=e=>{if(e.target.closest('#nxClock')){clockIn();return}const n=nextShift();if(n)openSched(n.id)};
+ $('sDays').onclick=e=>{const b=e.target.closest('[data-dw]');if(!b)return;const k=+b.dataset.dw;schDays.has(k)?schDays.delete(k):schDays.add(k);drawDays()};
+ ['sStart','sEnd','sBrk','sDate','sWeeks'].forEach(i=>$(i).addEventListener('input',schPrev));
+ $('sCancel').onclick=()=>{$('schModal').hidden=true};$('schModal').onclick=e=>{if(e.target.id==='schModal')$('schModal').hidden=true};
+ $('sDel').onclick=()=>{if(!schEdit||!confirm('Delete this scheduled shift?'))return;SC=SC.filter(x=>x.id!==schEdit);$('schModal').hidden=true;save();refreshAll();toast('Removed from your schedule.')};
+ $('sSave').onclick=()=>{const st=$('sStart').value,en=$('sEnd').value,brk=String(Math.max(0,Math.round(C.num($('sBrk').value,0)))),note=$('sNote').value.trim().slice(0,200);
+  if(!st||!en){toast('Pick a start and end time.');return}if(hrs({start:st,end:en,brk})<=0){toast('That shift has no paid time.');return}const ds=schDates();if(!ds.length){toast('No selected days fall on or after that date.');return}
+  if(schEdit){SC=SC.map(x=>x.id===schEdit?{...x,date:ds[0],start:st,end:en,brk,note}:x)}
+  else{const base=Date.now();let add=ds.map((d,i)=>({id:'sc'+base+'-'+i,date:d,start:st,end:en,brk,note})),dup=add.filter(n=>SC.some(x=>x.date===n.date&&x.start===n.start));add=add.filter(n=>!dup.includes(n));SC=[...SC,...add];
+   if(!add.length){toast('Those shifts are already on your schedule.');return}if(dup.length)toast(`Added ${add.length}; skipped ${dup.length} already scheduled.`)}
+  schWeek=wkStart(ds[0]);$('schModal').hidden=true;save();refreshAll();if(!schEdit&&ds.length>1)toast(`Saved ${ds.length} shifts to your schedule.`);else toast(schEdit?'Schedule updated.':'Saved to your schedule.');
+  if(C.num(P.remindMin,0)>0)askNotify()}}
+setInterval(()=>{if(!document.hidden)renderNext()},30000);
+
 // ---------- boot ----------
 $('eDate').value=today();$('eStart').value='09:00';$('eEnd').value='19:30';$('eBrk').value='30';
-bindEntry();setMode('times');setView('period');
+bindEntry();bindSched();setMode('times');setView('period');
 $('setBtn').onclick=()=>openSettings(false);
 $('bkExport').onclick=exportJSON;$('bkShare').onclick=shareJSON;$('bkFile').onchange=e=>importFile(e.target.files[0]);
 $('bkSnaps').onclick=async e=>{const b=e.target.closest('[data-snap]');if(!b)return;const all=await tx('snaps','readonly',o=>o.getAll());const x=all.find(y=>y.at===b.dataset.snap);if(x)try{restore(x.data,'the snapshot')}catch(err){toast(err.message)}};
@@ -190,5 +247,5 @@ if(navigator.serviceWorker&&!NATIVE){navigator.serviceWorker.register('sw.js');n
 setInterval(()=>{if(L)notifySW()},60000);
 if(NATIVE)setInterval(()=>{try{const n=JSON.parse(NATIVE.getState()||'null');if(n&&+(n.nativeAt||0)>NAT)syncAll(true)}catch(e){}},2000);
 syncAll().then(()=>{if(!P.setupDone)openSettings(true)});
-window.__calc={C,get P(){return P},get S(){return S}};
+window.__calc={C,get P(){return P},get S(){return S},get SC(){return SC}};
 window.__live={clockIn,clockOut,toggleBreak,get L(){return L},set L(v){L=v;save();tick()}};

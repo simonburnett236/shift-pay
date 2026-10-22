@@ -98,6 +98,24 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 .chips{display:flex;flex-wrap:wrap;gap:6px}.chips button{border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--tx2);border-radius:20px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}.chips button.on{background:rgba(124,140,255,.2);border-color:rgba(124,140,255,.6);color:var(--tx)}
 .full{grid-column:1/-1}
 .navrow{display:flex;gap:10px;margin-top:8px}.navrow .btn{flex:1}
+.nextc{display:flex;align-items:center;gap:14px;cursor:pointer;background:linear-gradient(135deg,rgba(167,139,250,.18),rgba(124,140,255,.08));border-color:rgba(167,139,250,.35)}
+.nextc.soon{border-color:rgba(246,197,96,.55);background:linear-gradient(135deg,rgba(246,197,96,.18),rgba(167,139,250,.10))}
+.nxi{width:46px;height:46px;border-radius:14px;flex:0 0 46px;display:grid;place-items:center;background:linear-gradient(135deg,var(--e),var(--a));box-shadow:0 8px 22px rgba(167,139,250,.35)}
+.nextc.soon .nxi{background:linear-gradient(135deg,var(--c),var(--d))}
+.nxt{font-size:20px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.nxin{display:inline-block;margin-top:4px;font-size:12px;padding:3px 9px;border-radius:20px;background:rgba(246,197,96,.16);color:var(--c);font-weight:600}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:4px 0 14px}
+.cday{position:relative;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--tx2);border-radius:14px;padding:8px 0 7px;font:inherit;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;transition:.2s}
+.cday b{font-size:17px;color:var(--tx)}.cdn{font-size:10px;letter-spacing:.08em}.cdh{font-size:11px;font-variant-numeric:tabular-nums}
+.cday.has{background:linear-gradient(180deg,rgba(124,140,255,.28),rgba(79,209,197,.12));border-color:rgba(124,140,255,.5)}.cday.has .cdh{color:var(--tx);font-weight:600}
+.cday.today{box-shadow:0 0 0 2px var(--b) inset}.cday.past{opacity:.6}
+.cda{position:absolute;top:-6px;right:-4px;font-style:normal;font-size:9px;font-weight:700;background:var(--ok);color:#06210f;border-radius:10px;padding:1px 5px}
+.cmp{display:grid;grid-template-columns:78px 1fr 70px;align-items:center;gap:8px;font-size:12px;color:var(--tx2);margin:6px 0}.cmp div{height:10px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden}
+.cmp div i{display:block;height:100%;border-radius:6px;transition:width .6s cubic-bezier(.2,.8,.2,1)}.cmp b{text-align:right;color:var(--tx);font-variant-numeric:tabular-nums;font-weight:600}
+.sshift{width:100%;display:flex;align-items:center;gap:12px;padding:12px 0;border:0;border-bottom:1px solid var(--line);background:none;color:var(--tx);font:inherit;cursor:pointer;animation:in .3s ease both}.sshift:last-child{border-bottom:0}
+.sshift .day{background:rgba(167,139,250,.16)}.sshift.done{opacity:.65}.chev{color:var(--tx3);font-size:22px;padding:0 4px}
+.addbtn{margin-left:auto;font-size:13px;padding:8px 12px;border-radius:12px}
+.btn.del{background:rgba(240,138,168,.12);color:var(--d);box-shadow:none}
+textarea{width:100%;background:rgba(0,0,0,.25);border:1px solid var(--line);color:var(--tx);border-radius:12px;padding:11px 12px;font:inherit;font-size:16px;resize:vertical;min-height:46px}
 </style></head><body><div class="wrap">
 <div class="mini" id="mini"><div id="mOff"><button class="mclock" id="mClock"><span class="mdot"></span>Clock In</button></div>
 <div id="mOn" hidden><div class="mleft"><div class="mrow"><span class="mdot"></span><span id="mIn"></span></div><div class="mrow2"><b id="mEarn">$0.00</b><span id="mTime">00:00:00</span></div></div>
@@ -114,6 +132,8 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 <div class="note" id="lToOT" style="margin:10px 0 14px"></div>
 <div class="row"><button class="btn ghost" id="lBreak">Start break</button><button class="btn out" id="lOut">Clock out</button></div></div>
 
+<div class="card nextc" id="nextCard" hidden><div class="nxi"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></div><div style="flex:1;min-width:0"><div class="lbl" id="nxDay"></div><div class="nxt" id="nxTime"></div><div class="note" id="nxMeta"></div><span class="nxin" id="nxIn" hidden></span></div><span class="chev">›</span></div>
+
 <div class="card hero">
 <div class="seg" id="vSeg"><button data-v="period">Pay period</button><button data-v="ytd">Year to date</button></div>
 <div class="lbl" id="heroLbl">Estimated take-home</div>
@@ -129,6 +149,16 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 <div class="card"><h2><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Week</h2>
 <div class="weeknav"><button class="sm" id="prevW" aria-label="Previous week">‹</button><div id="wLabel"></div><button class="sm" id="nextW" aria-label="Next week">›</button></div>
 <div class="donut-wrap"><svg viewBox="0 0 150 150" id="ring"></svg><svg viewBox="0 0 280 150" id="bars" style="flex:1 1 220px;max-width:100%"></svg></div></div>
+
+<div class="card" id="schedule"><h2><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M8 14h3M8 17h6"/></svg>Schedule<button class="btn addbtn" id="scAdd">+ Add to schedule</button></h2>
+<div class="weeknav"><button class="sm" id="scPrev" aria-label="Previous week">‹</button><div id="scLabel"></div><button class="sm" id="scNext" aria-label="Next week">›</button></div>
+<div class="cal" id="scCal"></div>
+<div class="row" style="margin-bottom:6px"><div class="stat"><div class="v" id="scHrs">0</div><div class="k">Scheduled hrs</div></div><div class="stat"><div class="v" id="scGross">$0</div><div class="k">Est. gross</div></div><div class="stat"><div class="v" id="scNet" style="color:var(--b)">$0</div><div class="k">Est. take-home</div></div></div>
+<p class="note" id="scOT" hidden style="margin:0 0 6px"></p>
+<div class="cmp"><span>Scheduled</span><div><i id="cmpS" style="background:linear-gradient(90deg,#a78bfa,#7c8cff)"></i></div><b id="cmpSv">0</b></div>
+<div class="cmp"><span>Worked</span><div><i id="cmpA" style="background:linear-gradient(90deg,#5b6cf0,#4fd1c5)"></i></div><b id="cmpAv">0</b></div>
+<p class="note" id="cmpNote" style="margin:4px 0 8px"></p>
+<div id="scList"></div></div>
 
 <div class="card" id="entry"><h2><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span id="eTitle">Log a shift</span></h2>
 <div class="seg" id="eSeg"><button data-v="times">Clock in / out</button><button data-v="hours">Just hours</button></div>
@@ -153,5 +183,12 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 <p class="note" id="footNote"></p>
 </div>
 <div class="modal" id="setModal" hidden><div class="sheet" id="sheet"></div></div>
+<div class="modal" id="schModal" hidden><div class="sheet"><h3 id="scTitle">Add to schedule</h3><p class="lead">Estimated pay uses your overtime and tax settings.</p>
+<div class="grid2"><label style="grid-column:1/-1">Date<input id="sDate" type="date"></label><label>Start<input id="sStart" type="time"></label><label>End<input id="sEnd" type="time"></label>
+<label>Unpaid break (min)<input id="sBrk" type="number" inputmode="numeric" min="0"></label><label style="grid-column:1/-1">Note (optional)<textarea id="sNote" rows="1" maxlength="200" placeholder="Route, wave time, reminders…"></textarea></label></div>
+<div id="sRepeat" class="grp" style="margin-top:14px"><div class="lbl" style="margin-bottom:6px">Repeat on (optional)</div><div class="chips" id="sDays"></div>
+<label id="sWeeksRow" hidden style="margin-top:10px">For how many weeks<input id="sWeeks" type="number" inputmode="numeric" min="1" max="52" value="4"></label></div>
+<p class="note" id="sPrev"></p>
+<div class="navrow"><button class="btn del" id="sDel" hidden>Delete</button><button class="btn ghost" id="sCancel">Cancel</button><button class="btn" id="sSave">Save to schedule</button></div></div></div>
 <div id="toast" class="toast" hidden></div>
 <script src="core.js"></script><script src="app.js"></script></body></html>

@@ -8,7 +8,7 @@ const PER={weekly:52,biweekly:26,semimonthly:24,monthly:12};
 const DEF={setupDone:false,name:'',employer:'',pos:'Delivery Driver',rate:'22.50',freq:'weekly',anchor:'',weekStart:'1',
  otWeekly:'40',otDaily:'',otMult:'1.5',dtDaily:'',dtMult:'2',breaksPaid:false,autoAfter:'',autoMin:'30',rounding:'0',
  filing:'single',stateCode:'IL',stateRate:'',il:'1',w4Extra:'0',pretax:'0',currency:'USD',clock:'12',
- manual:false,mm:'combined',comb:'20',fed:'10',state:'4.95'};
+ remindMin:'60',manual:false,mm:'combined',comb:'20',fed:'10',state:'4.95'};
 function migrate(p){p=Object.assign({},p||{});const old={'52':'weekly','26':'biweekly','24':'semimonthly','12':'monthly'};if(old[p.freq])p.freq=old[p.freq];
  const o=Object.assign({},DEF,p);if(!PER[o.freq])o.freq='weekly';if(!BR[o.filing])o.filing='single';return o}
 const num=(v,d)=>{const n=parseFloat(v);return Number.isFinite(n)?n:d};
