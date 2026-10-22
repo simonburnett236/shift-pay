@@ -87,26 +87,25 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 .mb.mout{background:linear-gradient(135deg,#f08aa8,#e0607e);color:#fff}
 .mclock{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:12px;padding:11px;font:inherit;font-weight:700;color:#fff;background:linear-gradient(135deg,rgba(124,140,255,.9),rgba(79,209,197,.9));cursor:pointer}
 .mclock .mdot{background:#fff;animation:none}
-</style></head><body><div class="wrap"><div class="mini" id="mini"><div id="mOff"><button class="mclock" id="mClock"><span class="mdot"></span>Clock In</button></div>
+
+.modal{position:fixed;inset:0;z-index:20;background:rgba(5,7,12,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:flex;align-items:flex-end;justify-content:center;animation:in .25s ease both}
+.sheet{width:100%;max-width:560px;max-height:92vh;overflow:auto;background:linear-gradient(180deg,#141826,#0e111b);border:1px solid var(--line);border-radius:26px 26px 0 0;padding:20px 18px calc(22px + env(safe-area-inset-bottom))}
+@media(min-width:600px){.modal{align-items:center}.sheet{border-radius:26px}}
+.sheet h3{margin:0 0 4px;font-size:22px;letter-spacing:-.02em}.sheet .lead{color:var(--tx2);font-size:14px;margin:0 0 16px}
+.steps{display:flex;gap:6px;margin:0 0 16px}.steps i{flex:1;height:4px;border-radius:4px;background:rgba(255,255,255,.1)}.steps i.on{background:linear-gradient(90deg,var(--a),var(--b))}
+.grp{margin:0 0 18px}.grp h4{margin:0 0 10px;font-size:13px;color:var(--tx2);text-transform:uppercase;letter-spacing:.08em}
+.hint{font-size:12px;color:var(--tx3);margin-top:-4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}.chips button{border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--tx2);border-radius:20px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}.chips button.on{background:rgba(124,140,255,.2);border-color:rgba(124,140,255,.6);color:var(--tx)}
+.full{grid-column:1/-1}
+.navrow{display:flex;gap:10px;margin-top:8px}.navrow .btn{flex:1}
+</style></head><body><div class="wrap">
+<div class="mini" id="mini"><div id="mOff"><button class="mclock" id="mClock"><span class="mdot"></span>Clock In</button></div>
 <div id="mOn" hidden><div class="mleft"><div class="mrow"><span class="mdot"></span><span id="mIn"></span></div><div class="mrow2"><b id="mEarn">$0.00</b><span id="mTime">00:00:00</span></div></div>
 <button class="mb" id="mBreak">Break</button><button class="mb mout" id="mOut">Clock Out</button></div></div>
 
 <header><div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-<div><h1 id="hName">Shift Pay</h1><div class="sub" id="hPos">Hours, overtime & take-home</div></div>
-<button class="icon-btn" id="profBtn" aria-label="Profile"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></button></header>
-
-<div class="card" id="profile" hidden><h2>Profile</h2>
-<div class="grid2">
-<label>Name<input id="pName"></label><label>Position<input id="pPos"></label>
-<label>Hourly pay ($)<input id="pRate" type="number" inputmode="decimal" step="0.01"></label>
-<label>Pay frequency<select id="pFreq"><option value="52">Weekly</option><option value="26">Every 2 weeks</option><option value="24">Twice a month</option><option value="12">Monthly</option></select></label>
-<label>Filing status<select id="pFiling"><option value="single">Single</option><option value="married">Married jointly</option><option value="hoh">Head of household</option></select></label>
-<label>IL-W-4 allowances<input id="pIl" type="number" inputmode="numeric"></label></div>
-<div class="tog">Use my own tax rate<span class="sw"><input type="checkbox" id="pManual"><span></span></span></div>
-<div id="manualBox" hidden>
-<div class="seg" id="mSeg"><button data-v="combined">One combined %</button><button data-v="split">Federal + state</button></div>
-<div class="grid2"><label id="cL">Combined %<input id="pComb" type="number" inputmode="decimal"></label><label id="fL">Federal %<input id="pFed" type="number" inputmode="decimal"></label><label id="sL">State %<input id="pState" type="number" inputmode="decimal"></label></div>
-<p class="note" id="splitNote">Social Security and Medicare are still added on top.</p></div></div>
+<div><h1 id="hName">Shift Pay</h1><div class="sub" id="hPos">Hours, overtime &amp; take-home</div></div>
+<button class="icon-btn" id="setBtn" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></header>
 
 <button id="clockBtn" class="clockbtn"><span class="cb-ring"></span><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Clock In</button>
 <div class="card live" id="live" hidden><div class="live-top"><span class="dot"></span><span id="lState"></span><span class="rate" id="lRate"></span><span class="otb" id="lOT" hidden>Overtime</span></div>
@@ -114,9 +113,10 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 <div class="row"><div class="stat"><div class="v lg" id="lGross">$0.00</div><div class="k">Earned this shift</div></div><div class="stat"><div class="v lg" id="lNet">$0.00</div><div class="k">Est. take-home</div></div></div>
 <div class="note" id="lToOT" style="margin:10px 0 14px"></div>
 <div class="row"><button class="btn ghost" id="lBreak">Start break</button><button class="btn out" id="lOut">Clock out</button></div></div>
+
 <div class="card hero">
-<div class="seg" id="vSeg"><button data-v="week">This week</button><button data-v="ytd">Year to date</button></div>
-<div class="lbl">Estimated take-home</div>
+<div class="seg" id="vSeg"><button data-v="period">Pay period</button><button data-v="ytd">Year to date</button></div>
+<div class="lbl" id="heroLbl">Estimated take-home</div>
 <div class="big" id="net">$0.00</div>
 <div class="row" style="margin-top:12px">
 <div class="stat"><div class="v" id="gross">$0</div><div class="k">Gross pay</div></div>
@@ -135,7 +135,7 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 <div class="grid2"><label style="grid-column:1/-1">Date<input id="eDate" type="date"></label>
 <label class="tm">Clock in<input id="eStart" type="time"></label><label class="tm">Clock out<input id="eEnd" type="time"></label>
 <label class="hr" hidden>Hours<input id="eHours" type="number" inputmode="decimal" step="0.25"></label>
-<label>Unpaid break (min)<input id="eBrk" type="number" inputmode="numeric"></label></div>
+<label>Break (min)<input id="eBrk" type="number" inputmode="numeric"></label></div>
 <p class="note" id="ePrev"></p>
 <div class="row"><button class="btn" id="eSave">Add shift</button><button class="btn ghost" id="eCancel" hidden>Cancel</button></div></div>
 
@@ -147,8 +147,11 @@ details summary{cursor:pointer;list-style:none}details summary::-webkit-details-
 <div class="row"><button class="btn" id="bkExport">Download backup</button><button class="btn ghost" id="bkShare">Share to Drive / Files</button></div>
 <div class="row" style="margin-top:10px"><label class="btn ghost" style="text-align:center;flex-direction:row;justify-content:center;color:var(--tx);font-size:15px">Restore from file<input type="file" id="bkFile" accept="application/json,.json" hidden></label></div>
 <div id="bkSnaps"></div>
-<p class="note">Your data saves on this phone twice (browser storage and IndexedDB) and keeps the last 5 automatic snapshots. A downloaded or shared file is the only copy that survives losing or resetting the phone. Nothing is uploaded anywhere.</p></div>
-<div id="toast" class="toast" hidden></div>
-<p class="note">These are estimates. Your ADP pay stub is the real number: pre-tax benefits, extra W-4 withholding and rounding change the actual check. Federal uses the 2026 IRS Pub 15-T percentage method (2020+ W-4, nothing else checked); Illinois is 4.95% after $2,925 per IL-W-4 allowance. Overtime over 40 hrs/week is paid at 1.5×. Data stays on this device.</p>
+<p class="note">Your data saves on this phone twice and keeps the last 5 automatic snapshots. A downloaded or shared file is the only copy that survives losing or resetting the phone. Nothing is uploaded anywhere.</p></div>
+
+<p class="note" id="getApk"><a href="https://github.com/simonburnett236/shift-pay/releases/latest" style="color:var(--a)">Get the Android app (APK)</a></p>
+<p class="note" id="footNote"></p>
 </div>
-<script src="app.js"></script></body></html>
+<div class="modal" id="setModal" hidden><div class="sheet" id="sheet"></div></div>
+<div id="toast" class="toast" hidden></div>
+<script src="core.js"></script><script src="app.js"></script></body></html>
