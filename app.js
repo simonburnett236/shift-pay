@@ -5,24 +5,27 @@ function okLive(l){if(!l||typeof l!=='object'||!Number.isFinite(l.start)||l.star
 let st;try{st=JSON.parse(localStorage.getItem(KEY))||{}}catch(e){st={}}
 let P=C.migrate(st.p),S=Array.isArray(st.s)?st.s:[],L=okLive(st.l),view='period',mode='times',editId=null;
 const money=n=>C.money(n,P),hrs=s=>C.hrs(s,P),wkStart=d=>C.wkStart(d,P);
-let week=wkStart(today());
+let week=wkStart(today()),NAT=+(st.nativeAt||0);
 
 // ---------- storage: localStorage + IndexedDB (+ native SharedPreferences in the Android app) ----------
 let idbp;const idb=()=>idbp||(idbp=new Promise((res,rej)=>{const r=indexedDB.open('shiftpay',1);r.onupgradeneeded=()=>{r.result.createObjectStore('kv');r.result.createObjectStore('snaps',{keyPath:'at'})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}));
-const tx=async(store,mode,fn)=>{const d=await idb();return new Promise((res,rej)=>{const t=d.transaction(store,mode),o=fn(t.objectStore(store));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)})};
+const withTO=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(Error('timeout')),ms))]);
+const tx=(store,mode,fn)=>withTO(idb().then(d=>new Promise((res,rej)=>{const t=d.transaction(store,mode),o=fn(t.objectStore(store));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)})),2500).catch(e=>{if(e.message==='timeout')idbp=null;throw e});
 let snapTimer;
-function stateJSON(){const o={p:P,s:S,l:L,savedAt:new Date().toISOString()};if(L)o.sched=C.schedule(S,P,iso(new Date(L.start)));o.nextSched=C.schedule(S,P,today());return JSON.stringify(o)}
+function stateJSON(){const o={p:P,s:S,l:L,savedAt:new Date().toISOString(),nativeAt:NAT};if(L)o.sched=C.schedule(S,P,iso(new Date(L.start)));o.nextSched=C.schedule(S,P,today());return JSON.stringify(o)}
 const save=()=>{const json=stateJSON();let ok=false;try{localStorage.setItem(KEY,json);ok=true}catch(e){}
  if(NATIVE){try{NATIVE.setState(json);ok=true}catch(e){}}
  tx('kv','readwrite',o=>o.put(json,'state')).then(()=>{notifySW()}).catch(()=>{if(!ok)toast('Saving failed. Download a backup now.')});
  clearTimeout(snapTimer);snapTimer=setTimeout(snapshot,3000)};
 async function snapshot(){if(!S.length)return;try{await tx('snaps','readwrite',o=>o.put({at:new Date().toISOString(),data:backupObj()}));const all=await tx('snaps','readonly',o=>o.getAll());for(const x of all.sort((a,b)=>b.at.localeCompare(a.at)).slice(5))await tx('snaps','readwrite',o=>o.delete(x.at));renderBackup()}catch(e){}}
-function adopt(d){if(!d||!Array.isArray(d.s))return false;P=C.migrate(d.p);S=d.s;L=okLive(d.l);try{localStorage.setItem(KEY,JSON.stringify({p:P,s:S,l:L,savedAt:d.savedAt}))}catch(e){}return true}
-async function syncAll(quiet){let best=null;const cand=[];try{const ls=localStorage.getItem(KEY);if(ls)cand.push(JSON.parse(ls))}catch(e){}
+function adopt(d){if(!d||!Array.isArray(d.s))return false;P=C.migrate(d.p);S=d.s;L=okLive(d.l);NAT=Math.max(NAT,+(d.nativeAt||0));try{localStorage.setItem(KEY,JSON.stringify({p:P,s:S,l:L,savedAt:d.savedAt,nativeAt:NAT}))}catch(e){}return true}
+let syncQ=Promise.resolve();function syncAll(quiet){syncQ=syncQ.then(()=>withTO(syncNow(quiet),6000)).catch(()=>{});return syncQ}
+async function syncNow(quiet){let best=null;const cand=[];try{const ls=localStorage.getItem(KEY);if(ls)cand.push(JSON.parse(ls))}catch(e){}
  try{const v=await tx('kv','readonly',o=>o.get('state'));if(v)cand.push(JSON.parse(v))}catch(e){}
- if(NATIVE){try{const v=NATIVE.getState();if(v)cand.push(JSON.parse(v))}catch(e){}}
+ let nat=null;if(NATIVE){try{const v=NATIVE.getState();if(v){nat=JSON.parse(v);cand.push(nat)}}catch(e){}}
  for(const c of cand)if(c&&Array.isArray(c.s)&&(!best||(c.savedAt||'')>(best.savedAt||'')))best=c;
  const cur=(()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){return null}})();
+ if(nat&&Array.isArray(nat.s)&&+(nat.nativeAt||0)>NAT){adopt(nat);refreshAll();save();return}
  if(best&&(!cur||(best.savedAt||'')>(cur.savedAt||''))){adopt(best);if(!cur&&!quiet&&best.s.length)toast('Recovered your data from the backup copy on this phone.')}
  refreshAll();save()}
 window.__spSync=()=>syncAll(true);
@@ -185,6 +188,7 @@ $('mClock').onclick=()=>clockIn();$('mBreak').onclick=toggleBreak;$('mOut').oncl
 setInterval(tick,250);document.addEventListener('visibilitychange',()=>{if(!document.hidden){syncAll(true)}});
 if(navigator.serviceWorker&&!NATIVE){navigator.serviceWorker.register('sw.js');navigator.serviceWorker.addEventListener('message',e=>{if(e.data&&e.data.type==='state')syncAll(true)})}
 setInterval(()=>{if(L)notifySW()},60000);
+if(NATIVE)setInterval(()=>{try{const n=JSON.parse(NATIVE.getState()||'null');if(n&&+(n.nativeAt||0)>NAT)syncAll(true)}catch(e){}},2000);
 syncAll().then(()=>{if(!P.setupDone)openSettings(true)});
 window.__calc={C,get P(){return P},get S(){return S}};
 window.__live={clockIn,clockOut,toggleBreak,get L(){return L},set L(v){L=v;save();tick()}};
