@@ -17,7 +17,7 @@ let idbp;const idb=()=>idbp||(idbp=new Promise((res,rej)=>{const r=indexedDB.ope
 const tx=async(store,mode,fn)=>{const d=await idb();return new Promise((res,rej)=>{const t=d.transaction(store,mode),o=fn(t.objectStore(store));t.oncomplete=()=>res(o&&o.result);t.onerror=()=>rej(t.error)})};
 let snapTimer;
 const save=()=>{const json=JSON.stringify({p:P,s:S,l:L,savedAt:new Date().toISOString()});let ok=false;try{localStorage.setItem(KEY,json);ok=true}catch(e){}
- tx('kv','readwrite',o=>o.put(json,'state')).then(()=>{ok=true}).catch(()=>{if(!ok)toast('Saving failed. Download a backup now.')});
+ tx('kv','readwrite',o=>o.put(json,'state')).then(()=>{ok=true;notifySW()}).catch(()=>{if(!ok)toast('Saving failed. Download a backup now.')});
  clearTimeout(snapTimer);snapTimer=setTimeout(snapshot,3000)};
 async function snapshot(){if(!S.length)return;try{await tx('snaps','readwrite',o=>o.put({at:new Date().toISOString(),data:backupObj()}));const all=await tx('snaps','readonly',o=>o.getAll());const old=all.sort((a,b)=>b.at.localeCompare(a.at)).slice(5);for(const x of old)await tx('snaps','readwrite',o=>o.delete(x.at));renderBackup()}catch(e){}}
 function backupObj(){return{format:'ShiftPay',version:1,exportedAt:new Date().toISOString(),profile:P,shifts:S,activeShift:L}}
@@ -112,7 +112,13 @@ setMode('times');setView('week');setMM(P.mm,true);
 $('bkExport').onclick=exportJSON;$('bkShare').onclick=shareJSON;$('bkFile').onchange=e=>importFile(e.target.files[0]);
 $('bkSnaps').onclick=async e=>{const b=e.target.closest('[data-snap]');if(!b)return;const all=await tx('snaps','readonly',o=>o.getAll());const x=all.find(y=>y.at===b.dataset.snap);if(x)try{restore(x.data,'the snapshot')}catch(err){toast(err.message)}};
 // recover from IndexedDB if localStorage was cleared
-(async()=>{try{const v=await tx('kv','readonly',o=>o.get('state'));const lsHas=!!localStorage.getItem(KEY);if(v&&!lsHas){const d=JSON.parse(v);if(Array.isArray(d.s)){P={...DEF,...d.p};S=d.s;L=okLive(d.l);localStorage.setItem(KEY,v);syncInputs();render();toast('Recovered your data from the backup copy on this phone.')}}else if(lsHas&&!v)save()}catch(e){}renderBackup()})();
+function notifySW(){try{if(L&&navigator.serviceWorker&&navigator.serviceWorker.controller)navigator.serviceWorker.controller.postMessage('refresh');else if(!L&&navigator.serviceWorker)navigator.serviceWorker.ready.then(r=>r.getNotifications({tag:'shiftpay-live'})).then(ns=>ns.forEach(n=>n.close())).catch(()=>{})}catch(e){}}
+async function syncFromIDB(quiet){try{const v=await tx('kv','readonly',o=>o.get('state'));const ls=localStorage.getItem(KEY);const lsAt=ls?(JSON.parse(ls).savedAt||''):'';
+ if(v){const d=JSON.parse(v);if(Array.isArray(d.s)&&(!ls||(d.savedAt||'')>lsAt)){P={...DEF,...d.p};S=d.s;L=okLive(d.l);try{localStorage.setItem(KEY,v)}catch(e){}syncInputs();render();tick();if(!ls&&!quiet)toast('Recovered your data from the backup copy on this phone.')}}
+ else if(ls)save()}catch(e){}renderBackup()}
+syncFromIDB();
+if(navigator.serviceWorker)navigator.serviceWorker.addEventListener('message',e=>{if(e.data&&e.data.type==='state')syncFromIDB(true)});
+setInterval(()=>{if(L)notifySW()},60000);
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
 window.__calc={calc,pay,fedW};
 
@@ -125,7 +131,7 @@ function liveNums(now){const worked=Math.max(0,now-L.start-breakMs(now)),h=worke
  return{worked,h,prior,gross:b.gross-a.gross,net:(b.gross-tb.total)-(a.gross-ta.total),ot,toOT:Math.max(0,40-prior-h),rate:(+P.rate||0)*(ot?1.5:1)}}
 const fmtT=ms=>{const s=Math.floor(ms/1e3);return pad(Math.floor(s/3600))+':'+pad(Math.floor(s/60)%60)+':'+pad(s%60)};
 const baseTitle='Shift Pay';
-function tick(){const lc=$('live'),cb=$('clockBtn');if(!L){lc.hidden=true;cb.hidden=false;document.title=baseTitle;return}
+function tick(){miniTick();const lc=$('live'),cb=$('clockBtn');if(!L){lc.hidden=true;cb.hidden=false;document.title=baseTitle;return}
  lc.hidden=false;cb.hidden=true;const now=Date.now(),n=liveNums(now);
  lc.classList.toggle('ot',n.ot);lc.classList.toggle('brk',!!L.onBreak);
  $('lTimer').textContent=fmtT(n.worked);$('lGross').textContent=money(n.gross);$('lNet').textContent=money(n.net);
@@ -135,7 +141,8 @@ function tick(){const lc=$('live'),cb=$('clockBtn');if(!L){lc.hidden=true;cb.hid
  $('lBreak').textContent=L.onBreak?'End break':'Start break';
  document.title=(L.onBreak?'⏸ ':'● ')+money(n.gross)+' · '+baseTitle;
  if(!L.asked&&now-L.start>16*36e5){L.asked=true;save();setTimeout(()=>{if(confirm('You have been clocked in for over 16 hours. Did you forget to clock out?\n\nOK = clock out now (you can fix the end time after).\nCancel = keep the clock running.'))clockOut()},50)}}
-function clockIn(at){L={start:at||Date.now(),breaks:[],onBreak:null,asked:false};save();tick();toast('Clocked in. Have a good shift.')}
+function clockIn(at){L={start:at||Date.now(),breaks:[],onBreak:null,asked:false};save();tick();toast('Clocked in. Have a good shift.');askNotify()}
+async function askNotify(){try{if(!('Notification'in window)||!navigator.serviceWorker)return;if(Notification.permission==='default')await Notification.requestPermission();if(Notification.permission==='granted'){notifySW();const r=await navigator.serviceWorker.ready;if(r.periodicSync)r.periodicSync.register('shiftpay-refresh',{minInterval:60000}).catch(()=>{})}}catch(e){}}
 function toggleBreak(){const now=Date.now();if(L.onBreak){L.breaks.push({s:L.onBreak,e:now});L.onBreak=null;toast('Break ended. Back on the clock.')}else{L.onBreak=now;toast('Break started. Earnings paused.')}save();tick()}
 function clockOut(){if(!L)return;const now=Date.now();if(L.onBreak){L.breaks.push({s:L.onBreak,e:now});L.onBreak=null}
  const brk=Math.round(L.breaks.reduce((a,b)=>a+b.e-b.s,0)/6e4),s={id:String(now),date:iso(new Date(L.start)),start:hm(L.start),end:hm(now),hours:'',brk:String(brk)};
@@ -144,3 +151,9 @@ function clockOut(){if(!L)return;const now=Date.now();if(L.onBreak){L.breaks.pus
 $('clockBtn').onclick=()=>clockIn();$('lBreak').onclick=toggleBreak;$('lOut').onclick=()=>{if(confirm('Clock out and save this shift?'))clockOut()};
 setInterval(tick,250);tick();document.addEventListener('visibilitychange',tick);
 window.__live={clockIn,clockOut,toggleBreak,get L(){return L},set L(v){L=v;save();tick()}};
+
+function miniTick(){const m=$('mini');if(!L){m.classList.remove('on','ot','brk');$('mOff').hidden=false;$('mOn').hidden=true;return}
+ const n=liveNums(Date.now());m.classList.add('on');m.classList.toggle('ot',n.ot);m.classList.toggle('brk',!!L.onBreak);$('mOff').hidden=true;$('mOn').hidden=false;
+ $('mIn').textContent=(L.onBreak?'On break · in since ':'In since ')+new Date(L.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+ $('mEarn').textContent=money(n.gross);$('mTime').textContent=fmtT(n.worked);$('mBreak').textContent=L.onBreak?'End Break':'Break'}
+$('mClock').onclick=()=>clockIn();$('mBreak').onclick=toggleBreak;$('mOut').onclick=()=>{if(confirm('Clock out and save this shift?'))clockOut()};
